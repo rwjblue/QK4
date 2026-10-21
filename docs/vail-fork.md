@@ -127,7 +127,7 @@ reproduction steps.
 ## Branches, versions, and releases
 
 - `upstream` points to `mikeg-dal/QK4`; `origin` points to `rwjblue/QK4`.
-- `codex/vail` is the maintained fork branch and should be the fork's default
+- `rwjblue/vail` is the maintained fork branch and should be the fork's default
   branch. Keep the upstream branches available for comparison.
 - Keep Vail runtime/tests and fork packaging/docs in focused commits so the
   patch stack is small and easy to reapply.
@@ -139,7 +139,7 @@ reproduction steps.
   secrets and gh-pages setup. A `vail-` prefix would still match `v*`; do not use
   it for fork release tags.
 
-`fork-ci.yml` runs on pushes and pull requests to `codex/vail`, and on demand.
+`fork-ci.yml` runs on pushes and pull requests to `rwjblue/vail`, and on demand.
 It runs the upstream-pinned formatting check and the full unit-test suite on
 Linux, both normally and under ASAN/UBSAN. The macOS builder runs the four Vail
 suites, including live CoreMIDI integration and the options-page regression test,
@@ -166,9 +166,9 @@ release assets after all checks pass. It does not update gh-pages. No secrets
 beyond GitHub's per-run token are needed.
 
 GitHub requires a dispatchable workflow to exist on the repository's default
-branch. This fork uses `codex/vail` as its default. During initial setup, GitHub
+branch. This fork uses `rwjblue/vail` as its default. During initial setup, GitHub
 did not register the new workflows on the branch's first push; setting the fork
-default to `codex/vail` registered them, after which dispatching Fork CI started
+default to `rwjblue/vail` registered them, after which dispatching Fork CI started
 the first check/build run. For a fresh fork, enable Actions, set the fork branch
 as default, and dispatch Fork CI before tagging a release. Later branch pushes
 start CI normally. See
@@ -177,16 +177,16 @@ start CI normally. See
 After committing the tested changes, push with the normal signed `jj` workflow:
 
 ```sh
-jj bookmark set codex/vail -r <tested-change>
-jj git push --remote origin --bookmark codex/vail
-gh run list --repo rwjblue/QK4 --workflow fork-ci.yml --branch codex/vail
+jj bookmark set rwjblue/vail -r <tested-change>
+jj git push --remote origin --bookmark rwjblue/vail
+gh run list --repo rwjblue/QK4 --workflow fork-ci.yml --branch rwjblue/vail
 gh run watch --repo rwjblue/QK4 <run-id> --exit-status
 
-# Optional release-path rehearsal, after codex/vail becomes the default branch.
-gh workflow run fork-release.yml --repo rwjblue/QK4 --ref codex/vail
+# Optional release-path rehearsal, after rwjblue/vail becomes the default branch.
+gh workflow run fork-release.yml --repo rwjblue/QK4 --ref rwjblue/vail
 
 # Only tag the same signed commit whose checks passed.
-jj tag set fork-v0.8.0-beta.1.1 -r codex/vail
+jj tag set fork-v0.8.0-beta.1.1 -r rwjblue/vail
 jj git push --remote origin --tag fork-v0.8.0-beta.1.1
 gh run list --repo rwjblue/QK4 --workflow fork-release.yml
 gh run watch --repo rwjblue/QK4 <release-run-id> --exit-status
@@ -200,17 +200,17 @@ There is no scheduled auto-rebase. Start with a released tag rather than a
 moving development branch, inspect the upstream changelog, and check for native
 Vail support before carrying the patch forward.
 
-For an untagged mutable patch stack, `jj rebase -b codex/vail --onto <new-upstream-tag>`
+For an untagged mutable patch stack, `jj rebase -b rwjblue/vail --onto <new-upstream-tag>`
 is sufficient after creating a backup bookmark. A published stack is protected
 by release tags: duplicate it onto the new base to preserve existing releases
 and avoid moving tags while rewriting commits:
 
 ```sh
 jj git fetch --remote upstream
-jj bookmark create archive/vail-before-update -r codex/vail
+jj bookmark create archive/vail-before-update -r rwjblue/vail
 
 # Substitute the currently documented base tag and the chosen new release tag.
-jj duplicate 'v0.8.0-beta.1..codex/vail' --onto <new-upstream-tag>
+jj duplicate 'v0.8.0-beta.1..rwjblue/vail' --onto <new-upstream-tag>
 # Inspect the new changes and resolve conflicts; copy the new tip ID from output.
 jj new <new-fork-tip>
 ```
@@ -220,7 +220,7 @@ CW ownership, timed keying protocol, and device settings. Repeat the local
 format/build/tests, CI packaging, and hardware acceptance checks. Update this
 document's base version and first-release wording as appropriate. After review,
 move the fork branch to the new tip with
-`jj bookmark set codex/vail -r <new-fork-tip> --allow-backwards`, push with `jj`,
+`jj bookmark set rwjblue/vail -r <new-fork-tip> --allow-backwards`, push with `jj`,
 wait for CI, and publish a fresh `fork-v<new-upstream-version>.1` tag. Keep the
 old release assets and tags available for rollback.
 

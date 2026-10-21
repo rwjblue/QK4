@@ -4,9 +4,9 @@ run-name: Vail checks and packages - ${{ github.ref_name }}
 
 on:
   push:
-    branches: [codex/vail]
+    branches: [rwjblue/vail]
   pull_request:
-    branches: [codex/vail]
+    branches: [rwjblue/vail]
   workflow_dispatch:
   workflow_call:
     inputs:
