@@ -1,5 +1,9 @@
 # QK4
 
+This fork adds **Vail Adapter keying with the adapter's immediate local sidetone**.
+Download macOS and Linux prereleases from [this fork's releases](https://github.com/rwjblue/QK4/releases).
+See [Vail setup and fork maintenance](docs/vail-fork.md) for setup, validation limits and rebasing.
+
 A cross-platform desktop application for remote control of Elecraft K4 radios over TCP/IP with real-time audio streaming and spectrum display.
 
 [![Release](https://img.shields.io/github/v/release/mikeg-dal/QK4?include_prereleases)](https://github.com/mikeg-dal/QK4/releases)

@@ -1,0 +1,102 @@
+name: Fork Release
+
+run-name: Vail ${{ github.event_name == 'push' && github.ref_name || 'release rehearsal' }}
+
+on:
+  push:
+    # Starts with 'f' so upstream release.yml's v* trigger cannot also fire.
+    tags: ['fork-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.repository == 'rwjblue/QK4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve fork version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            [[ "$GITHUB_REF_NAME" =~ ^fork-v[0-9][A-Za-z0-9._-]*$ ]] || exit 1
+            VERSION="${GITHUB_REF_NAME#fork-v}-vail"
+          else
+            VERSION="vail-rehearsal-${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/fork-ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.macos-artifact }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.flatpak-artifact }}
+      - name: Prepare checksums and release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sha256sum "QK4-${VERSION}-macos.dmg" "QK4-${VERSION}-linux-x86_64.flatpak" > SHA256SUMS.txt
+          cat > RELEASE_NOTES.md <<'NOTES'
+          Unofficial QK4 fork with Vail adapter support. This is a prerelease for hardware testing.
+
+          - macOS: Apple Silicon, macOS 15 or newer. The app is ad-hoc signed and is not Apple notarized.
+          - Linux: x86_64 Flatpak, using the KDE 6.10 runtime.
+          - Physical Vail adapter and K4 end-to-end verification is still required. Bench-test key-up, disconnect, and radio behavior before transmitting on air.
+
+          NOTES
+          printf '\nBuilt from %s.\n\nSetup, limitations, and maintenance: %s/%s/blob/%s/docs/vail-fork.md\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> RELEASE_NOTES.md
+          {
+            echo "Built from ${GITHUB_SHA}."
+            echo
+            cat RELEASE_NOTES.md
+            echo
+            cat SHA256SUMS.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Save assembled release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vail-release-${{ needs.version.outputs.version }}
+          path: |
+            QK4-*.dmg
+            QK4-*.flatpak
+            SHA256SUMS.txt
+            RELEASE_NOTES.md
+          retention-days: 14
+      - name: Publish fork prerelease
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/fork-v')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          name: QK4 ${{ needs.version.outputs.version }} (hardware testing)
+          prerelease: true
+          make_latest: false
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
+          files: |
+            QK4-${{ needs.version.outputs.version }}-macos.dmg
+            QK4-${{ needs.version.outputs.version }}-linux-x86_64.flatpak
+            SHA256SUMS.txt
