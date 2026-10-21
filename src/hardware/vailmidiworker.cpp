@@ -126,11 +126,12 @@ void VailMidiWorker::start() {
     m_holdTimer->setTimerType(Qt::PreciseTimer);
     connect(m_holdTimer, &QTimer::timeout, this, [this]() {
         if (m_running.load(std::memory_order_acquire)) {
-            const auto result = m_stream.checkTimeout(nowNs());
+            const auto timestampNs = nowNs();
+            const auto result = m_stream.checkTimeout(timestampNs);
             if (result.aborted) {
                 qCWarning(hwVail) << "Vail key hold exceeded safety timeout; release all keys to rearm";
             }
-            deliver(result);
+            deliver(result, timestampNs);
         }
     });
     m_holdTimer->start();
@@ -186,7 +187,8 @@ bool VailMidiWorker::applyConfiguration() {
 }
 
 void VailMidiWorker::setKeyingEnabled(bool enabled) {
-    deliver(m_stream.setEnabled(enabled, nowNs()));
+    const auto timestampNs = nowNs();
+    deliver(m_stream.setEnabled(enabled, timestampNs), timestampNs);
 }
 
 void VailMidiWorker::midiCallback(double, std::vector<unsigned char> *message, void *userData) {
@@ -211,18 +213,18 @@ void VailMidiWorker::midiCallback(double, std::vector<unsigned char> *message, v
 }
 
 void VailMidiWorker::handleMidiMessage(const std::vector<unsigned char> &message, std::int64_t timestampNs) {
-    deliver(m_stream.accept(message, timestampNs));
+    deliver(m_stream.accept(message, timestampNs), timestampNs);
     if (!m_stream.notesDown()) {
         applyConfiguration();
     }
 }
 
-void VailMidiWorker::deliver(const VailMidiProtocol::Result &result) {
+void VailMidiWorker::deliver(const VailMidiProtocol::Result &result, std::int64_t timestampNs) {
     if (!result.command.isEmpty()) {
         emit timedKeyingCommand(result.command);
     }
     if (result.stateChanged) {
-        emit keyingStateChanged(result.down);
+        emit keyingStateChanged(result.down, static_cast<qint64>(timestampNs));
     }
     if (result.aborted) {
         emit keyingAborted();
@@ -254,7 +256,8 @@ void VailMidiWorker::checkPortPresence() {
 }
 
 void VailMidiWorker::fail(const QString &message) {
-    deliver(m_stream.setEnabled(false, nowNs()));
+    const auto timestampNs = nowNs();
+    deliver(m_stream.setEnabled(false, timestampNs), timestampNs);
     m_running.store(false, std::memory_order_release);
     if (m_presenceTimer) {
         m_presenceTimer->stop();

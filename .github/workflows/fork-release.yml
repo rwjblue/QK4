@@ -63,6 +63,8 @@ jobs:
           cat > RELEASE_NOTES.md <<'NOTES'
           Unofficial QK4 fork with Vail adapter support. This is a prerelease for hardware testing.
 
+          CW Keyer settings offer immediate Vail buzzer sidetone or volume-controlled computer audio. Stock Vail firmware requires a manual paddle gesture to mute its buzzer; the settings panel and setup guide explain the steps. Pitch follows the K4's CW Pitch setting.
+
           - macOS: Apple Silicon, macOS 15 or newer. The app is ad-hoc signed and is not Apple notarized.
           - Linux: x86_64 Flatpak, using the KDE 6.10 runtime.
           - Physical Vail adapter and K4 end-to-end verification is still required. Bench-test key-up, disconnect, and radio behavior before transmitting on air.

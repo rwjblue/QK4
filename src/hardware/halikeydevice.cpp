@@ -64,6 +64,12 @@ bool HalikeyDevice::openPort(const QString &portName) {
             },
             Qt::DirectConnection);
         connect(
+            vail, &VailMidiWorker::keyingStateChanged, this,
+            [this, token](bool down, qint64 timestampNs) {
+                emit routedVailKeyingStateChanged(down, *token, timestampNs);
+            },
+            Qt::DirectConnection);
+        connect(
             vail, &VailMidiWorker::keyingAborted, this,
             [this, token]() {
                 emit timedKeyingCommand(QStringLiteral("RX;"));

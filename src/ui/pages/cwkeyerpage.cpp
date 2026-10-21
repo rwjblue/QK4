@@ -51,6 +51,7 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
         }
         RadioSettings::instance()->setHalikeyDeviceType(type);
         updateCwKeyerDescription();
+        updateSidetoneControls();
         populateCwKeyerPorts();
     });
 
@@ -123,31 +124,41 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
     line3->setFixedHeight(K4Styles::Dimensions::SeparatorHeight);
     layout->addWidget(line3);
 
-    // Separator line
-    auto *line5 = new QFrame(this);
-    line5->setFrameShape(QFrame::HLine);
-    line5->setStyleSheet(K4Styles::Dialog::separator());
-    line5->setFixedHeight(K4Styles::Dimensions::SeparatorHeight);
-    layout->addWidget(line5);
-
     // Sidetone Settings section
     auto *sidetoneLabel = new QLabel("Sidetone Settings", this);
     sidetoneLabel->setStyleSheet(K4Styles::Dialog::sectionHeader());
     layout->addWidget(sidetoneLabel);
 
-    // Sidetone volume slider
-    auto *volumeLayout = new QHBoxLayout();
-    auto *volumeLabel = new QLabel("Volume:", this);
+    m_sidetoneSourceRow = new QWidget(this);
+    auto *sourceLayout = new QHBoxLayout(m_sidetoneSourceRow);
+    sourceLayout->setContentsMargins(0, 0, 0, 0);
+    auto *sourceLabel = new QLabel("Output:", m_sidetoneSourceRow);
+    sourceLabel->setStyleSheet(K4Styles::Dialog::formLabel());
+    sourceLabel->setFixedWidth(K4Styles::Dimensions::FormLabelWidth);
+    m_sidetoneSourceCombo = new QComboBox(m_sidetoneSourceRow);
+    m_sidetoneSourceCombo->setObjectName(QStringLiteral("vailSidetoneSource"));
+    m_sidetoneSourceCombo->setStyleSheet(K4Styles::Dialog::comboBox());
+    m_sidetoneSourceCombo->addItem("Vail buzzer (computer muted)", false);
+    m_sidetoneSourceCombo->addItem("Computer audio (mute Vail manually)", true);
+    m_sidetoneSourceCombo->setCurrentIndex(RadioSettings::instance()->vailComputerSidetone() ? 1 : 0);
+    connect(m_sidetoneSourceCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        RadioSettings::instance()->setVailComputerSidetone(m_sidetoneSourceCombo->currentData().toBool());
+        updateSidetoneControls();
+    });
+    sourceLayout->addWidget(sourceLabel);
+    sourceLayout->addWidget(m_sidetoneSourceCombo, 1);
+    layout->addWidget(m_sidetoneSourceRow);
+
+    m_sidetoneVolumeRow = new QWidget(this);
+    auto *volumeLayout = new QHBoxLayout(m_sidetoneVolumeRow);
+    volumeLayout->setContentsMargins(0, 0, 0, 0);
+    auto *volumeLabel = new QLabel("Volume:", m_sidetoneVolumeRow);
     volumeLabel->setStyleSheet(K4Styles::Dialog::formLabel());
     volumeLabel->setFixedWidth(K4Styles::Dimensions::FormLabelWidth);
 
     m_sidetoneVolumeSlider = new QSlider(Qt::Horizontal, this);
     m_sidetoneVolumeSlider->setRange(0, 100);
     m_sidetoneVolumeSlider->setValue(RadioSettings::instance()->sidetoneVolume());
-    m_sidetoneVolumeSlider->setEnabled(savedDeviceType != HalikeyDevice::Vail);
-    connect(m_cwKeyerDeviceTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        m_sidetoneVolumeSlider->setEnabled(m_cwKeyerDeviceTypeCombo->currentData().toInt() != HalikeyDevice::Vail);
-    });
     m_sidetoneVolumeSlider->setStyleSheet(
         K4Styles::sliderHorizontal(K4Styles::Colors::DarkBackground, K4Styles::Colors::AccentAmber));
 
@@ -165,16 +176,14 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
     volumeLayout->addWidget(volumeLabel);
     volumeLayout->addWidget(m_sidetoneVolumeSlider, 1);
     volumeLayout->addWidget(m_sidetoneVolumeValueLabel);
-    layout->addLayout(volumeLayout);
+    layout->addWidget(m_sidetoneVolumeRow);
 
-    // Sidetone help text
-    auto *sidetoneHelpLabel =
-        new QLabel("Computer sidetone volume. Vail uses its own buzzer; this slider does not control it. "
-                   "Frequency follows the K4's CW pitch setting.",
-                   this);
-    sidetoneHelpLabel->setStyleSheet(K4Styles::Dialog::helpText());
-    sidetoneHelpLabel->setWordWrap(true);
-    layout->addWidget(sidetoneHelpLabel);
+    m_sidetoneHelpLabel = new QLabel(this);
+    m_sidetoneHelpLabel->setObjectName(QStringLiteral("sidetoneHelp"));
+    m_sidetoneHelpLabel->setStyleSheet(K4Styles::Dialog::helpText());
+    m_sidetoneHelpLabel->setWordWrap(true);
+    layout->addWidget(m_sidetoneHelpLabel);
+    updateSidetoneControls();
 
     layout->addStretch();
 
@@ -255,17 +264,41 @@ void CwKeyerPage::updateCwKeyerDescription() {
 
     int type = m_cwKeyerDeviceTypeCombo->currentData().toInt();
     if (type == HalikeyDevice::Vail) {
-        m_cwKeyerDescLabel->setText("The Vail adapter generates CW and immediate sidetone on its own buzzer. "
-                                    "QK4 follows the K4's speed, pitch and Iambic A/B mode. Select the adapter's MIDI "
-                                    "port (it may use its board name). Keep its buzzer enabled and radio mode off. "
-                                    "Reverse paddles physically; the K4's reversal setting does not affect Vail. "
-                                    "Key holds over 2.4 seconds stop transmission until all inputs release.");
+        m_cwKeyerDescLabel->setText(
+            "The Vail adapter generates CW locally. "
+            "QK4 follows the K4's speed, pitch and Iambic A/B mode. Select the adapter's MIDI "
+            "port (it may use its board name). Keep radio mode off. "
+            "Reverse paddles physically; the K4's reversal setting does not affect Vail. "
+            "A continuous key-down over 2.4 seconds stops transmission until all inputs release.");
     } else if (type == 1) {
         m_cwKeyerDescLabel->setText("Connect a HaliKey MIDI paddle interface to send CW via the K4's keyer. "
                                     "The HaliKey MIDI uses standard MIDI note events to detect paddle and PTT inputs.");
     } else {
         m_cwKeyerDescLabel->setText("Connect a HaliKey paddle interface to send CW via the K4's keyer. "
                                     "The HaliKey uses serial port flow control signals to detect paddle inputs.");
+    }
+}
+
+void CwKeyerPage::updateSidetoneControls() {
+    const bool vail = m_cwKeyerDeviceTypeCombo->currentData().toInt() == HalikeyDevice::Vail;
+    const bool computer = !vail || RadioSettings::instance()->vailComputerSidetone();
+    m_sidetoneSourceRow->setVisible(vail);
+    m_sidetoneVolumeRow->setVisible(computer);
+    if (!vail) {
+        m_sidetoneHelpLabel->setText("Sound uses the speaker selected in Audio settings. 0% mutes computer "
+                                     "sidetone. Pitch follows the K4's CW Pitch setting.");
+    } else if (computer) {
+        m_sidetoneHelpLabel->setText("Computer sidetone is on; 0% mutes it. Sound uses the speaker selected in Audio "
+                                     "settings; pitch follows the K4's CW Pitch. USB/audio buffering adds some delay.\n"
+                                     "QK4 cannot switch the Vail buzzer off over MIDI. To mute it: Disconnect above, "
+                                     "keep USB plugged in, hold DIT for over 5 seconds until the confirmation tones, "
+                                     "then release and Connect. Unplugging USB restores the buzzer.");
+    } else {
+        m_sidetoneHelpLabel->setText(
+            "Computer sidetone is off. The Vail buzzer provides immediate sidetone at a fixed "
+            "level; it has no volume control. Pitch follows the K4's CW Pitch setting.\n"
+            "QK4 cannot switch the buzzer on over MIDI. If it is silent, unplug and reconnect "
+            "USB, then Connect above. Set the K4's remote TX monitor to 0 to avoid a delayed echo.");
     }
 }
 

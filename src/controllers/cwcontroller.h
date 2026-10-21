@@ -193,6 +193,10 @@ class KpodPlusDevice;
 // try to fix forward on the CW hot path.
 // =============================================================================
 
+namespace VailSidetoneRouting {
+class Route;
+}
+
 class CwController : public QObject {
     Q_OBJECT
 
@@ -219,10 +223,16 @@ public:
 private:
     void configureVailKeyer();
     void updateVailKeying();
+    void updateVailSidetone(bool forceReset = false);
     bool m_radioReady = false;
     // Shared by queued I/O/audio handlers so old software-keyer events cannot play
     // after selecting a device which already owns its keyer and sidetone.
     std::shared_ptr<std::atomic<bool>> m_vailSelected = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<bool>> m_vailComputerSidetone = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<quint64>> m_vailSidetoneGeneration = std::make_shared<std::atomic<quint64>>(0);
+    std::shared_ptr<std::atomic<bool>> m_vailSidetoneGate = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<VailSidetoneRouting::Route> m_vailSidetoneRoute;
+    bool m_vailSidetoneAllowed = false;
 
     // True when the KPOD+ device owns the CW path — reads the shared
     // atomic gate on ConnectionController with acquire ordering. While

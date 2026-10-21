@@ -82,6 +82,7 @@ signals:
     void lineStateChanged(bool dit, bool dah, bool ptt);
     void timedKeyingCommand(const QString &command);
     void routedVailKeyingCommand(const QString &command, quint64 epoch);
+    void routedVailKeyingStateChanged(bool down, quint64 epoch, qint64 timestampNs);
 
 private:
     void onRawLines(bool dit, bool dah, bool ptt);

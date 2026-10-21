@@ -66,6 +66,7 @@ private slots:
         RadioSettings::instance()->setHalikeyDeviceType(HalikeyDevice::Serial);
         RadioSettings::instance()->setHalikeyPortName(QString());
         RadioSettings::instance()->setSidetoneVolume(37);
+        RadioSettings::instance()->setVailComputerSidetone(false);
     }
 
     void selectionPersistsAndRestores() {
@@ -90,27 +91,60 @@ private slots:
         QCOMPARE(combo->currentData().toInt(), 2);
         auto *slider = reopened.findChild<QSlider *>();
         QVERIFY(slider);
-        QVERIFY(!slider->isEnabled());
+        QVERIFY(slider->isHidden() || slider->parentWidget()->isHidden());
         QCOMPARE(slider->value(), 37);
     }
 
-    void computerSidetoneIsDisabledOnlyForVail() {
+    void sidetoneSourceControlsVisibilityAndPersists() {
         RadioSettings::instance()->setHalikeyDeviceType(HalikeyDevice::Vail);
-        CwKeyerPage page(nullptr);
-        auto *combo = deviceTypeCombo(page);
-        auto *slider = page.findChild<QSlider *>();
-        QVERIFY(combo);
-        QVERIFY(slider);
-        QVERIFY(!slider->isEnabled());
+        {
+            CwKeyerPage page(nullptr);
+            page.resize(620, 650);
+            page.show();
+            auto *combo = deviceTypeCombo(page);
+            auto *source = page.findChild<QComboBox *>(QStringLiteral("vailSidetoneSource"));
+            auto *help = page.findChild<QLabel *>(QStringLiteral("sidetoneHelp"));
+            auto *slider = page.findChild<QSlider *>();
+            QVERIFY(combo);
+            QVERIFY(source);
+            QVERIFY(help);
+            QVERIFY(slider);
+            QVERIFY(source->isVisible());
+            QVERIFY(!slider->isVisible());
+            QVERIFY(help->text().contains(QStringLiteral("Computer sidetone is off")));
+            QVERIFY(help->text().contains(QStringLiteral("fixed level")));
+            QVERIFY(help->text().contains(QStringLiteral("cannot switch")));
 
-        combo->setCurrentIndex(combo->findData(HalikeyDevice::Midi));
-        QVERIFY(slider->isEnabled());
-        QCOMPARE(slider->value(), 37);
-        combo->setCurrentIndex(combo->findData(HalikeyDevice::Serial));
-        QVERIFY(slider->isEnabled());
-        combo->setCurrentIndex(combo->findData(HalikeyDevice::Vail));
-        QVERIFY(!slider->isEnabled());
-        QCOMPARE(RadioSettings::instance()->sidetoneVolume(), 37);
+            source->setCurrentIndex(source->findData(true));
+            QVERIFY(RadioSettings::instance()->vailComputerSidetone());
+            QVERIFY(slider->isVisible());
+            QVERIFY(slider->isEnabled());
+            QCOMPARE(slider->value(), 37);
+            QVERIFY(help->text().contains(QStringLiteral("Disconnect above")));
+            QVERIFY(help->text().contains(QStringLiteral("over 5 seconds")));
+            slider->setValue(0);
+            QCOMPARE(RadioSettings::instance()->sidetoneVolume(), 0);
+
+            combo->setCurrentIndex(combo->findData(HalikeyDevice::Midi));
+            QVERIFY(!source->isVisible());
+            QVERIFY(slider->isVisible());
+            QVERIFY(help->text().contains(QStringLiteral("0% mutes")));
+            combo->setCurrentIndex(combo->findData(HalikeyDevice::Serial));
+            QVERIFY(slider->isVisible());
+            combo->setCurrentIndex(combo->findData(HalikeyDevice::Vail));
+            QCOMPARE(source->currentData().toBool(), true);
+            QVERIFY(slider->isVisible());
+        }
+        QSettings persisted(QSettings::defaultFormat(), QSettings::UserScope, QStringLiteral("QK4"),
+                            QStringLiteral("QK4"));
+        QCOMPARE(persisted.value(QStringLiteral("vail/computerSidetone")).toBool(), true);
+        CwKeyerPage reopened(nullptr);
+        auto *source = reopened.findChild<QComboBox *>(QStringLiteral("vailSidetoneSource"));
+        QVERIFY(source);
+        QCOMPARE(source->currentData().toBool(), true);
+        source->setCurrentIndex(source->findData(false));
+        QVERIFY(!RadioSettings::instance()->vailComputerSidetone());
+        QCOMPARE(RadioSettings::instance()->sidetoneVolume(), 0);
     }
 
     void localKeyerInstructionsAreVisible() {
@@ -128,7 +162,7 @@ private slots:
             }
         }
         QVERIFY2(description, "Vail instructions must explain physical paddle reversal");
-        QVERIFY(description->text().contains(QStringLiteral("own buzzer")));
+        QVERIFY(description->text().contains(QStringLiteral("generates CW locally")));
         QVERIFY(description->text().contains(QStringLiteral("radio mode off")));
         QVERIFY(description->text().contains(QStringLiteral("2.4 seconds")));
         QVERIFY(description->isVisible());
@@ -139,9 +173,24 @@ private slots:
         auto *combo = deviceTypeCombo(page);
         QVERIFY(combo);
         QVERIFY(description->geometry().bottom() < combo->geometry().top());
+        auto *help = page.findChild<QLabel *>(QStringLiteral("sidetoneHelp"));
+        auto *source = page.findChild<QComboBox *>(QStringLiteral("vailSidetoneSource"));
+        QVERIFY(help);
+        QVERIFY(source);
+        const QString screenshot = qEnvironmentVariable("QK4_TEST_SCREENSHOT");
+        for (int mode = 0; mode < source->count(); ++mode) {
+            source->setCurrentIndex(mode);
+            QCoreApplication::processEvents();
+            QVERIFY(help->isVisible());
+            QVERIFY2(help->height() >= help->heightForWidth(help->width()), "Sidetone instructions are clipped");
+            QVERIFY2(page.rect().contains(help->geometry()), "Sidetone instructions extend outside the page");
+            if (!screenshot.isEmpty() && mode == 1)
+                QVERIFY(page.grab().save(screenshot + QStringLiteral(".computer.png")));
+        }
+        source->setCurrentIndex(0);
+        QCoreApplication::processEvents();
 
         // Opt-in visual QA without opening MainWindow or connecting to a radio/device.
-        const QString screenshot = qEnvironmentVariable("QK4_TEST_SCREENSHOT");
         if (!screenshot.isEmpty())
             QVERIFY2(page.grab().save(screenshot), qPrintable(QStringLiteral("could not save ") + screenshot));
     }

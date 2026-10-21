@@ -26,14 +26,14 @@ public slots:
 
 signals:
     void timedKeyingCommand(const QString &command);
-    void keyingStateChanged(bool down);
+    void keyingStateChanged(bool down, qint64 timestampNs);
     void keyingAborted();
 
 private:
     static void midiCallback(double deltaTime, std::vector<unsigned char> *message, void *userData);
     static std::int64_t nowNs();
     void handleMidiMessage(const std::vector<unsigned char> &message, std::int64_t timestampNs);
-    void deliver(const VailMidiProtocol::Result &result);
+    void deliver(const VailMidiProtocol::Result &result, std::int64_t timestampNs);
     bool applyConfiguration();
     void checkPortPresence();
     void fail(const QString &message);

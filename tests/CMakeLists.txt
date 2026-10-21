@@ -563,6 +563,16 @@ target_include_directories(test_vailcatrouting PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_vailcatrouting Qt6::Core Qt6::Test)
 add_test(NAME VailCatRoutingTests COMMAND test_vailcatrouting)
 
+add_executable(test_vaillivesidetone test_vaillivesidetone.cpp)
+target_include_directories(test_vaillivesidetone PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_vaillivesidetone Qt6::Core Qt6::Test)
+add_test(NAME VailLiveSidetoneTests COMMAND test_vaillivesidetone)
+
+add_executable(test_vailsidetonerouting test_vailsidetonerouting.cpp)
+target_include_directories(test_vailsidetonerouting PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_vailsidetonerouting Qt6::Core Qt6::Test)
+add_test(NAME VailSidetoneRoutingTests COMMAND test_vailsidetonerouting)
+
 if(NOT QK4_TESTS_ONLY)
     add_executable(test_vaildevice test_vaildevice.cpp
         ${CMAKE_SOURCE_DIR}/src/hardware/halikeydevice.cpp
