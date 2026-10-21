@@ -59,9 +59,12 @@ jobs:
           # The manifest already carries QK4_VERSION_FULL as a build env var with a
           # sensible local default, so CI only overrides its value — the build
           # command itself stays untouched and readable.
-          jq --arg sha "$GITHUB_SHA" --arg ver "$VERSION" '
+          # Fork commits must be fetched from the fork, not the upstream URL in
+          # the developer manifest. This also works unchanged in upstream CI.
+          SOURCE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          jq --arg sha "$GITHUB_SHA" --arg ver "$VERSION" --arg url "$SOURCE_URL" '
             (.modules[] | select(.name == "qk4") | .sources[] | select(.type == "git"))
-              |= (del(.branch) + {commit: $sha})
+              |= (del(.branch) + {commit: $sha, url: $url})
             | (.modules[] | select(.name == "qk4") | .["build-options"].env.QK4_VERSION_FULL)
               = $ver
           ' "$MANIFEST" > manifest.pinned.json
@@ -70,6 +73,9 @@ jobs:
           jq -e --arg sha "$GITHUB_SHA" '
             (.modules[] | select(.name=="qk4") | .sources[] | select(.type=="git") | .commit) == $sha
           ' manifest.pinned.json > /dev/null || { echo "ERROR: source commit not pinned"; exit 1; }
+          jq -e --arg url "$SOURCE_URL" '
+            (.modules[] | select(.name=="qk4") | .sources[] | select(.type=="git") | .url) == $url
+          ' manifest.pinned.json > /dev/null || { echo "ERROR: source repository not pinned"; exit 1; }
           jq -e --arg ver "$VERSION" '
             (.modules[] | select(.name=="qk4") | .["build-options"].env.QK4_VERSION_FULL) == $ver
           ' manifest.pinned.json > /dev/null || { echo "ERROR: version not stamped"; exit 1; }
