@@ -1,18 +1,27 @@
 # QK4
 
+This fork adds **Vail Adapter keying with the adapter's immediate local sidetone**.
+Download macOS, Windows, and Linux prereleases from [this fork's releases](https://github.com/rwjblue/QK4/releases).
+See [Vail setup and fork maintenance](docs/vail-fork.md) for setup, validation limits and rebasing.
+The upstream patch lives on [`rwjblue/vail-upstream`](https://github.com/rwjblue/QK4/tree/rwjblue/vail-upstream);
+this default branch adds fork packaging and release tooling.
+The .1.5 update tracks upstream `development` at `72025dfe`, preserving Vail's
+onboard keyer while integrating paced computer sidetone, the radio's saved
+Key-Down Delay control, and Escape to abort sending. See the guide for the
+current hardware validation limits.
+
 A cross-platform desktop application for remote control of Elecraft K4 radios over TCP/IP with real-time audio streaming and spectrum display.
 
-[![Release](https://img.shields.io/github/v/release/mikeg-dal/QK4?include_prereleases)](https://github.com/mikeg-dal/QK4/releases)
-[![Build](https://github.com/mikeg-dal/QK4/actions/workflows/release.yml/badge.svg)](https://github.com/mikeg-dal/QK4/actions/workflows/release.yml)
-[![CI](https://github.com/mikeg-dal/QK4/actions/workflows/ci-checks.yml/badge.svg)](https://github.com/mikeg-dal/QK4/actions/workflows/ci-checks.yml)
+[![Release](https://img.shields.io/github/v/release/rwjblue/QK4?include_prereleases)](https://github.com/rwjblue/QK4/releases)
+[![Build](https://github.com/rwjblue/QK4/actions/workflows/fork-release.yml/badge.svg)](https://github.com/rwjblue/QK4/actions/workflows/fork-release.yml)
+[![CI](https://github.com/rwjblue/QK4/actions/workflows/fork-ci.yml/badge.svg)](https://github.com/rwjblue/QK4/actions/workflows/fork-ci.yml)
 
 ## Supported Platforms
 
 | Platform | Minimum Version | Architecture |
 |----------|-----------------|--------------|
-| macOS | 14 (Sonoma) | Apple Silicon (M1/M2/M3/M4) |
+| macOS | 15 (Sequoia) | Apple Silicon |
 | Windows | 11 | x64 |
-| Linux | Debian Trixie / Ubuntu 24.04+ | ARM64 (Raspberry Pi 4/5) |
 | Linux | Any distribution with Flatpak | x86_64 |
 
 ## Features
@@ -27,11 +36,14 @@ A cross-platform desktop application for remote control of Elecraft K4 radios ov
 - **KPOD / KPOD+ Support** — USB integration with Elecraft KPOD tuning knob and KPOD+ CW keyer
 - **KPA1500 Support** — Optional integration with Elecraft KPA1500 amplifier
 - **CAT Server** — Built-in CAT server (port 9299) for integration with third-party logging and contest software
-- **Self-Contained Releases** — macOS DMG, Windows ZIP, Raspberry Pi tarball, and Linux Flatpak include all dependencies
+- **Self-Contained Fork Releases** — macOS DMG, Windows ZIP, and Linux Flatpak include the required application dependencies
 
 ## Download
 
-Pre-built releases are available on the [Releases](https://github.com/mikeg-dal/QK4/releases) page.
+Vail fork builds for Apple Silicon macOS 15+, Windows 11 x64, and Linux x86_64 Flatpak are available on
+[this fork's Releases page](https://github.com/rwjblue/QK4/releases).
+See the [setup guide](docs/vail-fork.md) for installation and validation limits.
+For other architectures, see [upstream QK4 releases](https://github.com/mikeg-dal/QK4/releases).
 
 
 ### Windows Prerequisite
