@@ -79,6 +79,13 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      # Keep virtual-clock keyer coverage here; the real-clock threaded suite
+      # depends on runner scheduling and remains mandatory in full Linux CI.
+      - name: Run CW keyer and Vail tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure --no-tests=error --timeout 60 -R '^(Vail|PaddleKeyer|SidetoneScheduler|SerialLinePoller|HalikeyMidiPorts)' -E '^PaddleKeyerThreadedTests$'
+
       - name: Create app bundle with dependencies
         run: |
           set -e
@@ -87,7 +94,7 @@ jobs:
           FRAMEWORKS="$APP_BUNDLE/Contents/Frameworks"
 
           # Run macdeployqt to bundle Qt frameworks
-          $(brew --prefix qt)/bin/macdeployqt "$APP_BUNDLE" -verbose=2
+          "$(brew --prefix qt)/bin/macdeployqt" "$APP_BUNDLE" -libpath="$(brew --prefix)/lib" -verbose=2
 
           # Copy QtDBus.framework (transitive dependency of QtGui in Homebrew Qt)
           echo "=== Copying QtDBus.framework ==="
@@ -373,6 +380,11 @@ jobs:
 
           test -f "$APP/Contents/PlugIns/tls/libqopensslbackend.dylib" \
             || { echo "ERROR: OpenSSL TLS backend missing - TLS/PSK would fail"; FAIL=1; }
+
+          if ! "$APP/Contents/MacOS/QK4" --version | grep -Fx "QK4 ${{ inputs.version }}"; then
+            echo "ERROR: packaged app cannot launch or reports the wrong version"
+            FAIL=1
+          fi
 
           hdiutil detach ./verify-mnt -quiet
           exit $FAIL
