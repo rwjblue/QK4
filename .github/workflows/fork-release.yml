@@ -1,0 +1,128 @@
+name: Fork Release
+
+run-name: Vail ${{ github.event_name == 'push' && github.ref_name || 'release rehearsal' }}
+
+on:
+  push:
+    # Starts with 'f' so upstream release.yml's v* trigger cannot also fire.
+    tags: ['fork-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.repository == 'rwjblue/QK4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve fork version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            [[ "$GITHUB_REF_NAME" =~ ^fork-v[0-9][A-Za-z0-9._-]*$ ]] || exit 1
+            VERSION="${GITHUB_REF_NAME#fork-v}-vail"
+          else
+            VERSION="vail-rehearsal-${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/fork-ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.macos-artifact }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.flatpak-artifact }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build.outputs.windows-artifact }}
+          path: QK4-windows
+      - name: Create Windows portable archive
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: zip -qr "QK4-${VERSION}-windows-x86_64.zip" QK4-windows
+      - name: Prepare checksums and release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sha256sum "QK4-${VERSION}-macos.dmg" "QK4-${VERSION}-linux-x86_64.flatpak" \
+            "QK4-${VERSION}-windows-x86_64.zip" > SHA256SUMS.txt
+          cat > RELEASE_NOTES.md <<'NOTES'
+          Unofficial QK4 fork with Vail adapter support, based on upstream development at [78f0aac9](https://github.com/mikeg-dal/QK4/commit/78f0aac97319528d920a642b70d84b7ce5cd916f). This is a prerelease for hardware testing.
+
+          **Mute the K4's CW monitor while keying** is now available in CW Keyer options for Vail and HaliKey. Enable it if the radio's delayed monitor comes back through receive audio. The shared keying path mutes the radio's reported CW monitor level during accepted sending and restores that level after queued keying and a short tail margin finish, accounting for Key-Down Delay. The setting defaults to off and leaves the Vail buzzer and computer volume independent.
+
+          Turning the checkbox off restores the observed level. QK4 also sends a restore before an intentional radio disconnect. An abrupt network or power loss can prevent restoration; check the K4's CW monitor level after reconnecting if it remains silent.
+
+          The Mac DMG now contains **QK4 Vail.app**, with the distinct bundle identifier com.rwjblue.qk4.vail. Install it at /Applications/QK4 Vail.app and keep the official /Applications/QK4.app. Both versions still share QK4 settings; close one before opening the other.
+
+          Vail continues to generate its own iambic elements and immediate buzzer sidetone. Optional computer sidetone uses paced audio output and device-format conversion while preserving timestamped MIDI edges. MIDI and audio-device latency still apply. Selecting computer audio does not mute the adapter buzzer: stock Vail firmware requires a manual paddle gesture while the Vail connection is disconnected in QK4. The setup guide explains the steps. No adapter firmware update is required.
+
+          **CW Keyer -> Remote Keying -> Key-Down Delay** keeps the K4's saved delay (0-1000 ms; default 80 ms); it does not delay the adapter buzzer. **Escape** aborts sending; release the paddles before resuming.
+
+          - macOS: Apple Silicon, macOS 15 or newer. QK4 Vail.app is ad-hoc signed without Apple notarization.
+          - Windows: Windows 11 x64 portable ZIP. Extract the complete QK4-windows folder and run QK4.exe. Qt, audio/USB libraries, and the Microsoft runtime are included. The app is unsigned, so Windows may show SmartScreen.
+          - Linux: x86_64 Flatpak, using the KDE 6.10 runtime. Its application ID is shared with upstream QK4.
+          - SHA256SUMS.txt covers all three packages.
+
+          Publication requires all 80 CTest suites in the tagged Linux normal and ASAN/UBSAN runs, the RealtimeSanitizer core run and its self-tests, 17 focused CW/Vail suites on macOS and Windows, and all three package checks to pass. The upstream real-clock PaddleKeyerThreaded suite stays mandatory on Linux; macOS and Windows use the deterministic keyer suites. Native builders and Linux tests use the exact Qt version in .github/qt-version. CI verifies the mounted Mac DMG's app name, bundle identity, strict code signature, and bundled OpenSSL TLS self-check, and launches both packaged desktop apps with --version.
+
+          Earlier builds were tested with a physical Vail and K4 through 28 WPM, including key-up/disconnect and both buzzer and computer sidetone. This monitor-mute change and upstream integration need fresh on-radio regression checks; physical Vail operation on Windows remains unverified. Previous release tags and assets are unchanged.
+
+          NOTES
+          printf '\nBuilt from %s.\n\nSetup, limitations, and maintenance: %s/%s/blob/%s/docs/vail-fork.md\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> RELEASE_NOTES.md
+          {
+            echo "Built from ${GITHUB_SHA}."
+            echo
+            cat RELEASE_NOTES.md
+            echo
+            cat SHA256SUMS.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Save assembled release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vail-release-${{ needs.version.outputs.version }}
+          path: |
+            QK4-*.dmg
+            QK4-*.flatpak
+            QK4-*.zip
+            SHA256SUMS.txt
+            RELEASE_NOTES.md
+          retention-days: 14
+      - name: Publish fork prerelease
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/fork-v')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          name: QK4 ${{ needs.version.outputs.version }} (hardware testing)
+          prerelease: true
+          make_latest: false
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
+          files: |
+            QK4-${{ needs.version.outputs.version }}-macos.dmg
+            QK4-${{ needs.version.outputs.version }}-linux-x86_64.flatpak
+            QK4-${{ needs.version.outputs.version }}-windows-x86_64.zip
+            SHA256SUMS.txt
