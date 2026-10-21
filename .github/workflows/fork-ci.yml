@@ -1,0 +1,108 @@
+name: Fork CI
+
+run-name: Vail checks and packages - ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [rwjblue/vail]
+  pull_request:
+    branches: [rwjblue/vail]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    outputs:
+      macos-artifact:
+        value: ${{ jobs.macos.outputs.artifact-name }}
+      flatpak-artifact:
+        value: ${{ jobs.flatpak.outputs.artifact-name }}
+      windows-artifact:
+        value: ${{ jobs.windows.outputs.artifact-name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  version:
+    if: github.repository == 'rwjblue/QK4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve package version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_VERSION:-vail-ci-${GITHUB_SHA:0:7}}"
+          [[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 1
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  format:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check formatting with upstream's pinned version
+        run: scripts/check-format.sh --bootstrap
+
+  tests:
+    needs: version
+    name: Tests (sanitizers ${{ matrix.sanitize }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: ['OFF', 'ON']
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      QT_QPA_PLATFORM: offscreen
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev qt6-base-private-dev \
+            qt6-multimedia-dev qt6-serialport-dev qt6-svg-dev \
+            qt6-shadertools-dev qt6-qpa-plugins \
+            libopus-dev libhidapi-dev libusb-1.0-0-dev libssl-dev libudev-dev libasound2-dev
+      - name: Configure tests
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DQK4_TESTS_SANITIZE=${{ matrix.sanitize }}
+      - name: Build all tests
+        run: cmake --build build --target qk4_tests
+      - name: Run all tests
+        run: ctest --test-dir build --output-on-failure
+
+  macos:
+    needs: version
+    uses: ./.github/workflows/_build-macos.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      retention-days: 14
+      sign: false
+
+  flatpak:
+    needs: version
+    uses: ./.github/workflows/_build-flatpak.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      retention-days: 14
+
+  windows:
+    needs: version
+    uses: ./.github/workflows/_build-windows.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      retention-days: 14
