@@ -26,6 +26,11 @@ on:
         required: false
         type: boolean
         default: true
+      fork-branding:
+        description: 'Package as QK4 Vail with a distinct macOS application identity'
+        required: false
+        type: boolean
+        default: false
     outputs:
       artifact-name:
         description: 'Name of the uploaded artifact'
@@ -36,6 +41,8 @@ permissions:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
+  QK4_MACOS_APP_NAME: ${{ inputs.fork-branding && 'QK4 Vail' || 'QK4' }}
+  QK4_MACOS_BUNDLE_ID: ${{ inputs.fork-branding && 'com.rwjblue.qk4.vail' || 'com.kf5o.qk4' }}
 
 jobs:
   build:
@@ -50,7 +57,7 @@ jobs:
 
       - name: Resolve artifact name
         id: names
-        run: echo "artifact=QK4-macos-${{ inputs.version }}" >> $GITHUB_OUTPUT
+        run: echo "artifact=QK4-macos-${{ inputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Read pinned Qt version
         run: echo "QT_VERSION=$(tr -d '[:space:]' < .github/qt-version)" >> "$GITHUB_ENV"
@@ -101,8 +108,40 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      # Keep virtual-clock keyer coverage here; the real-clock threaded suite
+      # depends on runner scheduling and remains mandatory in full Linux CI.
+      - name: Run CW keyer and Vail tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure --no-tests=error --timeout 60 -R '^(Vail|CwMonitor|PaddleKeyer|SidetoneScheduler|SerialLinePoller|HalikeyMidiPorts|KzEgress|RtScheduling|ThreadShutdown|HaliKeyPortScan)' -E '^PaddleKeyerThreadedTests$'
+
+      # Keep the fork beside the official app; default callers retain QK4.app.
+      # Apply the identity before deployment and signing so the shipped signature
+      # covers the actual application name and bundle identifier.
+
+      # Apply fork identity before deployment and signing; default callers retain QK4.app.
+      - name: Apply fork application identity
+        if: inputs.fork-branding
+        run: |
+          mv build/QK4.app "build/${QK4_MACOS_APP_NAME}.app"
+          python3 - <<'PYTHON'
+          import os
+          import plistlib
+          from pathlib import Path
+
+          app = Path("build") / f"{os.environ['QK4_MACOS_APP_NAME']}.app"
+          info_path = app / "Contents/Info.plist"
+          with info_path.open("rb") as source:
+              info = plistlib.load(source)
+          info["CFBundleName"] = os.environ["QK4_MACOS_APP_NAME"]
+          info["CFBundleDisplayName"] = os.environ["QK4_MACOS_APP_NAME"]
+          info["CFBundleIdentifier"] = os.environ["QK4_MACOS_BUNDLE_ID"]
+          with info_path.open("wb") as destination:
+              plistlib.dump(info, destination)
+          PYTHON
+
       - name: Create app bundle with dependencies
-        run: scripts/macos-bundle.sh build/QK4.app "$QT_ROOT_DIR" "$(brew --prefix openssl@3)"
+        run: scripts/macos-bundle.sh "build/${QK4_MACOS_APP_NAME}.app" "$QT_ROOT_DIR" "$(brew --prefix openssl@3)"
 
       - name: Import Code Signing Certificate
         if: inputs.sign
@@ -117,8 +156,8 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -A -t cert -f pkcs12 \
             -k "$KEYCHAIN_PATH"
@@ -133,7 +172,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           SIGN: ${{ inputs.sign }}
         run: |
-          APP_BUNDLE="build/QK4.app"
+          APP_BUNDLE="build/${QK4_MACOS_APP_NAME}.app"
 
           # WHY one step for both identities: an unsigned build must still walk the same
           # signing order, so the strict verify below judges the same bundle structure a
@@ -176,11 +215,11 @@ jobs:
       - name: Create DMG
         run: |
           DMG_NAME="QK4-${{ inputs.version }}-macos.dmg"
-          APP_BUNDLE="build/QK4.app"
+          APP_BUNDLE="build/${QK4_MACOS_APP_NAME}.app"
 
           echo "=== Creating DMG staging directory ==="
           mkdir -p dmg-staging
-          ditto "$APP_BUNDLE" dmg-staging/QK4.app
+          ditto "$APP_BUNDLE" "dmg-staging/${QK4_MACOS_APP_NAME}.app"
           ln -s /Applications dmg-staging/Applications
 
           sync
@@ -189,7 +228,7 @@ jobs:
 
           echo "=== Creating DMG ==="
           for attempt in 1 2 3; do
-            if hdiutil create -volname "QK4" \
+            if hdiutil create -volname "$QK4_MACOS_APP_NAME" \
               -srcfolder dmg-staging \
               -ov -format UDZO \
               -nocrossdev \
@@ -219,11 +258,11 @@ jobs:
             "$DMG_NAME"
 
           mkdir -p ~/private_keys
-          echo "$APPLE_API_KEY_BASE64" | base64 --decode > ~/private_keys/AuthKey_$APPLE_API_KEY_ID.p8
+          echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$HOME/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
 
           echo "=== Submitting DMG for notarization ==="
           xcrun notarytool submit "$DMG_NAME" \
-            --key ~/private_keys/AuthKey_$APPLE_API_KEY_ID.p8 \
+            --key "$HOME/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8" \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" \
             --wait \
@@ -239,16 +278,46 @@ jobs:
 
       - name: Verify DMG contents
         run: |
-          # WHY: this must inspect the *packaged* artifact, not build/QK4.app. Symlink
-          # flattening happens during packaging, so a gate on the build tree passes even
-          # when the shipped bundle is broken. The script also runs the packaged app's
-          # --tls-self-check and requires libssl to load from inside the bundle.
+          # Check the shipped identity and the upstream TLS/dependency gate inside the DMG.
+          # The latter requires OpenSSL to load from this bundle, not the build machine.
           DMG_NAME="QK4-${{ inputs.version }}-macos.dmg"
           hdiutil attach "$DMG_NAME" -nobrowse -quiet -mountpoint ./verify-mnt
-          STATUS=0
-          scripts/macos-verify-bundle.sh ./verify-mnt/QK4.app || STATUS=$?
-          hdiutil detach ./verify-mnt -quiet
-          exit $STATUS
+          trap 'hdiutil detach ./verify-mnt -quiet' EXIT
+          APP="./verify-mnt/${QK4_MACOS_APP_NAME}.app"
+          FAIL=0
+
+          python3 - "$APP" <<'PYTHON'
+          import os
+          import plistlib
+          import sys
+          from pathlib import Path
+
+          app = Path(sys.argv[1])
+          with (app / "Contents/Info.plist").open("rb") as source:
+              info = plistlib.load(source)
+          expected = {
+              "CFBundleName": os.environ["QK4_MACOS_APP_NAME"],
+              "CFBundleIdentifier": os.environ["QK4_MACOS_BUNDLE_ID"],
+              "CFBundleExecutable": "QK4",
+          }
+          if os.environ["QK4_MACOS_APP_NAME"] == "QK4 Vail":
+              expected["CFBundleDisplayName"] = "QK4 Vail"
+              if (app.parent / "QK4.app").exists():
+                  sys.exit("ERROR: fork DMG also contains the official QK4.app name")
+          for key, value in expected.items():
+              if info.get(key) != value:
+                  sys.exit(f"ERROR: packaged {key} is {info.get(key)!r}, expected {value!r}")
+          print(f"Packaged identity: {app.name}, {info['CFBundleIdentifier']}")
+          PYTHON
+
+          scripts/macos-verify-bundle.sh "$APP" || FAIL=$?
+
+          if ! "$APP/Contents/MacOS/QK4" --version | grep -Fx "QK4 ${{ inputs.version }}"; then
+            echo "ERROR: packaged app cannot launch or reports the wrong version"
+            FAIL=1
+          fi
+
+          exit $FAIL
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

@@ -31,31 +31,40 @@ permissions:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
+  SCCACHE_GHA_ENABLED: "true"
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-bincache
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 90
     outputs:
       artifact-name: ${{ steps.names.outputs.artifact }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
 
       - name: Resolve artifact name
         id: names
-        shell: bash
-        run: echo "artifact=QK4-windows-${{ inputs.version }}" >> $GITHUB_OUTPUT
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:PACKAGE_VERSION -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw 'Invalid package version'
+          }
+          "artifact=QK4-windows-$env:PACKAGE_VERSION" >> $env:GITHUB_OUTPUT
 
-      - name: Cache vcpkg binary packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - name: Restore vcpkg binary packages
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: vcpkg-bincache
           # Keyed on the manifest so a dependency or baseline bump rebuilds
           # instead of restoring stale binaries.
-          key: vcpkg-win-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-win-2022-x64-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            vcpkg-win-
+            vcpkg-win-2022-x64-
 
       - name: Read Qt version
         # WHY: .github/qt-version is the one Qt version every runner uses (scripts/check-qt-version.sh).
@@ -92,10 +101,36 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
 
       - name: Configure CMake
-        run: cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DQK4_VERSION_FULL="${{ inputs.version }}"
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DQK4_VERSION_FULL="$env:PACKAGE_VERSION"
+
+      - name: Save configured vcpkg packages
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: vcpkg-bincache
+          key: vcpkg-win-2022-x64-${{ hashFiles('vcpkg.json') }}
 
       - name: Build
         run: cmake --build build
+
+      # Keep virtual-clock keyer coverage here; the real-clock threaded suite
+      # depends on runner scheduling and remains mandatory in full Linux CI.
+      - name: Run CW keyer and Vail tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure --no-tests=error --timeout 60 -R '^(Vail|CwMonitor|PaddleKeyer|SidetoneScheduler|SerialLinePoller|HalikeyMidiPorts|KzEgress|RtScheduling|ThreadShutdown|HaliKeyPortScan)' -E '^PaddleKeyerThreadedTests$'
+
+      - name: Show CW monitor test diagnostics
+        if: always()
+        run: |
+          $log = 'build/tests/cwmonitorrouting-test.txt'
+          if (Test-Path $log) {
+            Get-Content $log
+          } else {
+            Write-Host 'CW monitor test log was not generated.'
+          }
 
       - name: Create release package
         run: |
@@ -103,6 +138,7 @@ jobs:
           copy build\QK4.exe QK4-windows\
 
           windeployqt --release --no-translations --no-compiler-runtime QK4-windows\QK4.exe
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
 
           # WHY: windeployqt omits the OpenSSL TLS backend plugin when it cannot locate
           # OpenSSL at deploy time, and the vcpkg DLLs below are copied after it runs.
@@ -131,7 +167,16 @@ jobs:
 
           $required = @(
             'QK4.exe',
-            'vcruntime140*.dll',
+            'vcruntime140.dll',
+            'vcruntime140_1.dll',
+            'msvcp140.dll',
+            'Qt6Core.dll',
+            'Qt6Gui.dll',
+            'Qt6Multimedia.dll',
+            'platforms\qwindows.dll',
+            'opus.dll',
+            'hidapi.dll',
+            'libusb-1.0.dll',
             'libssl-3-x64.dll',
             'libcrypto-3-x64.dll',
             'tls\qopensslbackend.dll'
@@ -140,6 +185,41 @@ jobs:
           if ($missing) {
             Write-Host "Bundle incomplete - missing: $($missing -join ', ')"
             exit 1
+          }
+
+      - name: Smoke-test the packaged application without build dependencies
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = (Resolve-Path QK4-windows\QK4.exe).Path
+          $start.WorkingDirectory = (Resolve-Path QK4-windows).Path
+          $start.UseShellExecute = $false
+          $start.RedirectStandardOutput = $true
+          $start.RedirectStandardError = $true
+          $start.ArgumentList.Add('--version')
+          $start.Environment['QT_QPA_PLATFORM'] = 'windows'
+          # Keep the runner's Qt and vcpkg DLLs from concealing missing bundle files.
+          $start.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot"
+          foreach ($name in @('QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML_IMPORT_PATH', 'QML2_IMPORT_PATH')) {
+            $start.Environment.Remove($name) | Out-Null
+          }
+          $process = [System.Diagnostics.Process]::Start($start)
+          $stdout = $process.StandardOutput.ReadToEndAsync()
+          $stderr = $process.StandardError.ReadToEndAsync()
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill($true)
+            throw 'Packaged QK4 --version timed out'
+          }
+          $version = $stdout.GetAwaiter().GetResult().Trim()
+          $diagnostics = $stderr.GetAwaiter().GetResult()
+          Write-Host $version
+          if ($diagnostics) { Write-Host $diagnostics }
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged QK4 failed with exit code $($process.ExitCode)"
+          }
+          if ($version -ne "QK4 $env:PACKAGE_VERSION") {
+            throw "Packaged QK4 reported unexpected version: $version"
           }
 
       # WHY upload the directory rather than a zip: actions/upload-artifact always

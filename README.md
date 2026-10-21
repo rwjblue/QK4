@@ -1,10 +1,21 @@
 # QK4
 
+This fork adds **Vail Adapter keying with the adapter's immediate local sidetone**.
+Download macOS, Windows, and Linux prereleases from [this fork's releases](https://github.com/rwjblue/QK4/releases).
+See [Vail setup and fork maintenance](docs/vail-fork.md) for setup, validation limits and rebasing.
+The upstream patch lives on [`rwjblue/vail-upstream`](https://github.com/rwjblue/QK4/tree/rwjblue/vail-upstream);
+this default branch adds fork packaging and release tooling.
+The .1.8 update tracks upstream `development` at `78f0aac9` and adds **Mute the
+K4's CW monitor while keying** for Vail and HaliKey. It preserves Vail's onboard
+keyer, paced computer sidetone, the radio's saved Key-Down Delay, and Escape to
+abort sending. Mac releases now install as **QK4 Vail.app** beside the official
+QK4.app. See the guide for setup and current hardware validation limits.
+
 A cross-platform desktop application for remote control of Elecraft K4 radios over TCP/IP with real-time audio streaming and spectrum display.
 
-[![Release](https://img.shields.io/github/v/release/mikeg-dal/QK4?include_prereleases)](https://github.com/mikeg-dal/QK4/releases)
-[![Build](https://github.com/mikeg-dal/QK4/actions/workflows/release.yml/badge.svg)](https://github.com/mikeg-dal/QK4/actions/workflows/release.yml)
-[![CI](https://github.com/mikeg-dal/QK4/actions/workflows/ci-checks.yml/badge.svg)](https://github.com/mikeg-dal/QK4/actions/workflows/ci-checks.yml)
+[![Release](https://img.shields.io/github/v/release/rwjblue/QK4?include_prereleases)](https://github.com/rwjblue/QK4/releases)
+[![Build](https://github.com/rwjblue/QK4/actions/workflows/fork-release.yml/badge.svg)](https://github.com/rwjblue/QK4/actions/workflows/fork-release.yml)
+[![CI](https://github.com/rwjblue/QK4/actions/workflows/fork-ci.yml/badge.svg)](https://github.com/rwjblue/QK4/actions/workflows/fork-ci.yml)
 
 ## Supported Platforms
 
@@ -12,7 +23,6 @@ A cross-platform desktop application for remote control of Elecraft K4 radios ov
 |----------|-----------------|--------------|
 | macOS | 15 (Sequoia) — set by `LSMinimumSystemVersion` in `resources/Info.plist.in` | Apple Silicon |
 | Windows | 11 | x64 |
-| Linux | Raspberry Pi OS / Debian Trixie | ARM64 (Raspberry Pi 4/5) |
 | Linux | Any distribution with Flatpak | x86_64 |
 
 ## Features
@@ -32,12 +42,21 @@ A cross-platform desktop application for remote control of Elecraft K4 radios ov
 - **CAT server** — native K4 CAT on TCP port 9299 (default) for WSJT-X, loggers and contest software
 - **TCI server** — TCI 2.0 over WebSocket on port 50001 (default), with RX/TX audio for digital-mode programs
 - **DX cluster** — one or more telnet cluster connections, with spots shown on the panadapter
-- **Self-contained releases** — macOS DMG, Windows ZIP, Raspberry Pi tarball and Linux Flatpak include all dependencies
+- **Self-contained fork releases** — macOS DMG, Windows ZIP and Linux Flatpak include the required application dependencies
 
 ## Download
 
-Pre-built releases are available on the [Releases](https://github.com/mikeg-dal/QK4/releases) page.
+Vail fork builds for Apple Silicon macOS 15+, Windows 11 x64, and Linux x86_64 Flatpak are available on
+[this fork's Releases page](https://github.com/rwjblue/QK4/releases).
+See the [setup guide](docs/vail-fork.md) for installation and validation limits.
+For other architectures, see [upstream QK4 releases](https://github.com/mikeg-dal/QK4/releases).
 
+### macOS installation
+
+Copy **QK4 Vail.app** from the DMG to `/Applications/QK4 Vail.app`. Keep the
+official app at `/Applications/QK4.app`. The fork has its own macOS bundle
+identity; both apps still share QK4 settings, so close one before opening the
+other. See the guide for first-launch instructions for the ad-hoc signed app.
 
 ### Windows Prerequisite
 
