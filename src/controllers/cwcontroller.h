@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <atomic>
+#include <memory>
 
 class RadioState;
 class ConnectionController;
@@ -63,13 +64,13 @@ class KpodPlusDevice;
 //      RtMidi's thread. Both stamp the edge on arrival; a queued hop would be timing error.
 //   2. m_cachedIsV14 and m_reversed are stored on the main thread (release) and loaded on those
 //      device threads (acquire).
-//   3. The keyer's commands reach TcpClient through FunctionLink → sendCAT, which queues to the
-//      I/O thread. One producer thread, one consumer: FIFO, so KZD/KZU stay in order.
+//   3. FunctionLink serializes software commands onto the I/O route. Session generations reject
+//      stale starts; a release retains the generation of its matching key-down.
 //   4. KPOD+ EP02 keyer data routes EP02 worker → I/O thread via QueuedConnection.
 //   5. On a KPOD+ gate rise, store the gate FIRST and then raise the inhibit.
 //   6. Destructor runs disconnect(this) first (CONVENTIONS Rule 11).
-//   7. The link is never gated: a KZU closing an open KZD must always reach the K4. Suppression
-//      is the inhibit's job, upstream of the keyer.
+//   7. The route always closes a forwarded KZD, even after its source is inhibited. A different
+//      source cannot start before that release; unmatched cleanup cannot interrupt its keying.
 //
 // Footswitch PTT: REMOVED, deliberately
 // -------------------------------------
@@ -85,6 +86,10 @@ class KpodPlusDevice;
 //   - Hold a paddle in CW and switch to SSB mid-press: keying stops, nothing stuck
 //   - Esc mid-burst: keying stops, radio unkeyed
 // =============================================================================
+
+namespace VailSidetoneRouting {
+class Route;
+}
 
 class CwController : public QObject {
     Q_OBJECT
@@ -104,10 +109,14 @@ public:
     void setKeyDownInitialDelay(int ms);
 
     /// Esc: stop QK4's own keying now. The burst ends at its next element boundary; an open
-    /// straight-key KZD gets its KZU.
+    /// straight-key KZD gets its KZU. Vail aborts immediately and waits for held inputs to release.
     void stopKeying();
 
 private:
+    void wireKeyingRoutes();
+    void configureVailKeyer();
+    void updateVailKeying();
+    void updateVailSidetone(bool forceReset = false);
     void applySpeed();
     void applyMode();
     void applyReversal();
@@ -122,11 +131,20 @@ private:
     HalikeyDevice *m_halikey;      // owned by HardwareController
     KpodPlusDevice *m_kpodPlus;    // owned by HardwareController
 
+    std::shared_ptr<std::atomic<bool>> m_vailSelected = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<bool>> m_softwareKeyingAllowed = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<quint64>> m_softwareKeyingGeneration = std::make_shared<std::atomic<quint64>>(0);
+    std::shared_ptr<std::atomic<bool>> m_vailComputerSidetone = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<quint64>> m_vailSidetoneGeneration = std::make_shared<std::atomic<quint64>>(0);
+    std::shared_ptr<std::atomic<bool>> m_vailSidetoneGate = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<VailSidetoneRouting::Route> m_vailSidetoneRoute;
+    bool m_vailSidetoneAllowed = false;
+
     // Main thread only.
     bool m_radioReady = false;
     bool m_kpodPlusGate = false;
 
-    // true = V1.4 serial (deviceType 0), false = MIDI (deviceType 1). See invariant 2.
+    // true only for V1.4 serial (deviceType 0). Vail bypasses the software keyer.
     std::atomic<bool> m_cachedIsV14{true};
     // The K4's KP paddle orientation is Reverse. See invariant 2.
     std::atomic<bool> m_reversed{false};

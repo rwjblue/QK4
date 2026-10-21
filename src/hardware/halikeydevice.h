@@ -8,6 +8,8 @@
 #include <QThread>
 #include <atomic>
 #include <memory>
+#include <functional>
+#include "vail_cat_routing.h"
 
 class HaliKeyWorkerBase;
 struct HaliKeyMidiSink;
@@ -23,11 +25,11 @@ struct HaliKeyPortInfo {
  *        business — see CwController; this class only debounces and forwards.
  *
  * Debounce responsibility lives in the worker:
- *   - V1.4 serial worker polls the lines every 1 ms on every platform through SerialLinePoller
- *     (port of K4-Companion's serial path) and emits paddleChanged: paddles on the first poll
- *     that sees a change, a straight key after 20 ms without one, and the line state at open
- *     taken as rest. The keyer reads paddles from time-stamped history, so a bounce inside an
- *     element changes nothing on the air.
+ *   - V1.4 serial worker confirms each transition across ≥2 reads before emitting. The read
+ *     cadence is platform-specific: blocking TIOCMIWAIT plus one 500 µs confirming re-read on
+ *     Linux, a 1 ms high-resolution-timer poll of GetCommModemStatus on Windows, and a 2 kHz
+ *     (500 µs) usleep poll on macOS. That count-based filter is the only contact-bounce
+ *     defense for the serial path.
  *   - MIDI worker emits firmware-debounced Note On/Off events as-is. There is no
  *     electrical bounce in a MIDI message stream.
  *
@@ -44,7 +46,9 @@ class HalikeyDevice : public QObject {
     Q_OBJECT
 
 public:
-    // deviceType: 0 = V1.4 serial, 1 = MIDI. HardwareController passes
+    enum DeviceType { Serial = 0, Midi = 1, Vail = 2 };
+
+    // deviceType: 0 = V1.4 serial, 1 = HaliKey MIDI, 2 = Vail. HardwareController passes
     // the current RadioSettings value at construction and re-sets it
     // via setDeviceType() when settings change — this device class
     // never reads RadioSettings itself, keeping the hardware layer
@@ -58,23 +62,20 @@ public:
     bool isConnected() const;
     QString portName() const;
 
-    // Updates the worker variant used on the next openPort(). Does not
-    // re-open an in-flight connection — callers that want a live switch
-    // should closePort() + openPort() themselves.
-    void setDeviceType(int deviceType) { m_deviceType = deviceType; }
+    void setDeviceType(int deviceType);
     int deviceType() const { return m_deviceType; }
+
+    void configureVailKeyer(int wpm, int pitchHz, int mode);
+    void setVailKeyingEnabled(bool enabled);
+    std::shared_ptr<VailCatRouting::Control> vailRoutingControl() const { return m_vailRouting; }
+
+    void setMidiSink(std::function<void(int, int, int, double)> sink);
+    void setStraightKey(bool straight);
 
     // Available ports
     static QStringList availablePorts();
     static QList<HaliKeyPortInfo> availablePortsDetailed();
     static QStringList availableMidiDevices();
-
-    // Raw MIDI messages, delivered on RtMidi's thread as they arrive (MIDI device type only).
-    // CwController points this at the keyer. Thread-safe; may be set before or after openPort().
-    void setMidiSink(std::function<void(int status, int note, int velocity, double deltaTime)> sink);
-
-    // Straight key / external keyer on the dit line (serial: 20 ms debounce, dah line ignored).
-    void setStraightKey(bool straight);
 
 signals:
     void connected();
@@ -84,22 +85,32 @@ signals:
     // Debounced input lines, emitted as one sample whenever any of them changes. See
     // HaliKeyWorkerBase::lineStateChanged for why the three travel together.
     void lineStateChanged(bool dit, bool dah, bool ptt);
-
-    // V1.4 serial: one paddle line changed. See HaliKeyWorkerBase::paddleChanged. Emitted on the
-    // worker thread.
     void paddleChanged(bool dah, bool asserted, double deltaTime);
+    void timedKeyingCommand(const QString &command);
+    void routedVailKeyingCommand(const QString &command, quint64 epoch);
+    void routedVailKeyingStateChanged(bool down, quint64 epoch, qint64 timestampNs);
 
 private:
     void onRawLines(bool dit, bool dah, bool ptt);
+    void updateVailRouting();
 
     std::shared_ptr<HaliKeyMidiSink> m_midiSink;
+    std::atomic<bool> m_straightKey{false};
     QThread *m_workerThread = nullptr;
     HaliKeyWorkerBase *m_worker = nullptr;
 
     QString m_portName;
     bool m_connected = false;
-    int m_deviceType = 0; // 0 = V1.4 serial, 1 = MIDI. Set via ctor / setDeviceType.
-    std::atomic<bool> m_straightKey{false};
+    int m_deviceType = Serial;
+    int m_vailWpm = 20;
+    int m_vailPitchHz = 600;
+    int m_vailMode = 0;
+    bool m_vailKeyingEnabled = false;
+    std::shared_ptr<VailCatRouting::Control> m_vailRouting = std::make_shared<VailCatRouting::Control>();
+    // Each worker gets a separate token; only its event loop reads/writes it.
+    std::shared_ptr<quint64> m_vailWorkerEpoch;
+    bool m_vailWorkerEnabled = false;
+    quint64 m_workerGeneration = 0;
 
     // Confirmed paddle state — written from whichever worker thread delivered the raw event
     // (RtMidi callback on the MIDI variant, monitor thread on the V1.4 variant). Same-direction

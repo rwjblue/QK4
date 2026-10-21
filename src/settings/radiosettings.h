@@ -157,7 +157,7 @@ public:
     bool halikeyEnabled() const;
     void setHalikeyEnabled(bool enabled);
     int halikeyDeviceType() const;
-    void setHalikeyDeviceType(int type); // 0=V14, 1=MiDi
+    void setHalikeyDeviceType(int type); // 0=V14, 1=MIDI, 2=Vail
     int sidetoneVolume() const;
     void setSidetoneVolume(int value); // 0-100, default 30
     // HaliKey keyer (PaddleKeyer). Mode: 0 = follow the K4's Iambic A/B (KP), 1 = Plain Iambic,
@@ -170,6 +170,8 @@ public:
     void setHalikeyDitMemoryDelay(int percent);
     bool halikeyMuteRadioMonitor() const; // mute the K4's CW monitor during each burst
     void setHalikeyMuteRadioMonitor(bool mute);
+    bool vailComputerSidetone() const;
+    void setVailComputerSidetone(bool enabled);
 
     // DX Cluster settings
     QVector<DxClusterEntry> dxClusters() const;
@@ -260,6 +262,7 @@ signals:
     void halikeyStraightKeyChanged(bool straight);
     void halikeyDitMemoryDelayChanged(int percent);
     void halikeyMuteRadioMonitorChanged(bool mute);
+    void vailComputerSidetoneChanged(bool enabled);
     void rxEqPresetsChanged();
     void txEqPresetsChanged();
     void dxClusterSettingsChanged();
@@ -297,12 +300,13 @@ private:
     // HaliKey settings
     QString m_halikeyPortName;
     bool m_halikeyEnabled = false;
-    int m_halikeyDeviceType = 0; // 0=V14, 1=MiDi
+    int m_halikeyDeviceType = 0; // 0=V14, 1=MIDI, 2=Vail
     int m_sidetoneVolume = 30;   // Default 30%
     int m_halikeyKeyerMode = 0;
     bool m_halikeyStraightKey = false;
     int m_halikeyDitMemoryDelay = 33;
     bool m_halikeyMuteRadioMonitor = false;
+    bool m_vailComputerSidetone = false;
 
     // Macro settings
     QMap<QString, MacroEntry> m_macros;

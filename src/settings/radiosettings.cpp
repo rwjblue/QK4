@@ -633,6 +633,18 @@ void RadioSettings::setHalikeyMuteRadioMonitor(bool mute) {
     }
 }
 
+bool RadioSettings::vailComputerSidetone() const {
+    return m_vailComputerSidetone;
+}
+
+void RadioSettings::setVailComputerSidetone(bool enabled) {
+    if (m_vailComputerSidetone != enabled) {
+        m_vailComputerSidetone = enabled;
+        save();
+        emit vailComputerSidetoneChanged(enabled);
+    }
+}
+
 // =============================================================================
 // KPOD+ Keyer Settings
 // =============================================================================
@@ -846,6 +858,7 @@ void RadioSettings::load() {
     m_halikeyStraightKey = m_settings.value("halikey/straightKey", false).toBool();
     m_halikeyDitMemoryDelay = qBound(0, m_settings.value("halikey/ditMemoryDelay", 33).toInt(), 100);
     m_halikeyMuteRadioMonitor = m_settings.value("halikey/muteRadioMonitor", false).toBool();
+    m_vailComputerSidetone = m_settings.value("vail/computerSidetone", false).toBool();
 
     // KPOD+ keyer settings
     m_kpodPlusEncodeMode = m_settings.value("kpodPlus/encodeMode", 0).toInt();
@@ -952,6 +965,7 @@ void RadioSettings::save() {
     m_settings.setValue("halikey/straightKey", m_halikeyStraightKey);
     m_settings.setValue("halikey/ditMemoryDelay", m_halikeyDitMemoryDelay);
     m_settings.setValue("halikey/muteRadioMonitor", m_halikeyMuteRadioMonitor);
+    m_settings.setValue("vail/computerSidetone", m_vailComputerSidetone);
 
     // KPOD+ keyer settings
     m_settings.setValue("kpodPlus/encodeMode", m_kpodPlusEncodeMode);
