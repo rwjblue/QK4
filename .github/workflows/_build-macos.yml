@@ -26,6 +26,11 @@ on:
         required: false
         type: boolean
         default: true
+      fork-branding:
+        description: 'Package as QK4 Vail with a distinct macOS application identity'
+        required: false
+        type: boolean
+        default: false
     outputs:
       artifact-name:
         description: 'Name of the uploaded artifact'
@@ -36,6 +41,8 @@ permissions:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
+  QK4_MACOS_APP_NAME: ${{ inputs.fork-branding && 'QK4 Vail' || 'QK4' }}
+  QK4_MACOS_BUNDLE_ID: ${{ inputs.fork-branding && 'com.rwjblue.qk4.vail' || 'com.kf5o.qk4' }}
 
 jobs:
   build:
@@ -53,9 +60,16 @@ jobs:
       # on development, identical on every platform; no per-platform marker.
       - name: Resolve artifact name
         id: names
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
         run: |
-          echo "artifact=QK4-macos-${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          echo "DMG_NAME=QK4-${{ inputs.version }}-macos.dmg" >> "$GITHUB_ENV"
+          set -euo pipefail
+          if ! [[ "$PACKAGE_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "::error::Invalid package version"
+            exit 1
+          fi
+          echo "artifact=QK4-macos-${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "DMG_NAME=QK4-${PACKAGE_VERSION}-macos.dmg" >> "$GITHUB_ENV"
 
       - name: Read pinned Qt version
         run: echo "QT_VERSION=$(tr -d '[:space:]' < .github/qt-version)" >> "$GITHUB_ENV"
@@ -94,6 +108,8 @@ jobs:
       # OpenSSL could never load on an Intel Mac, so Qt would fall back to Secure Transport, which
       # has no PSK cipher suites. scripts/macos-bundle.sh thins Qt's universal binaries to match.
       - name: Configure CMake
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -101,13 +117,41 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-            -DQK4_VERSION_FULL="${{ inputs.version }}"
+            -DQK4_VERSION_FULL="$PACKAGE_VERSION"
 
       - name: Build
         run: cmake --build build --config Release
 
+      # Keep virtual-clock keyer coverage here; the real-clock threaded suite
+      # depends on runner scheduling and remains mandatory in full Linux CI.
+      - name: Run CW keyer and Vail tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure --no-tests=error --timeout 60 -R '^(Vail|CwMonitor|PaddleKeyer|SidetoneScheduler|SerialLinePoller|HalikeyMidiPorts|KzEgress|RtScheduling|ThreadShutdown|HaliKeyPortScan|MidiDeviceWatcher)' -E '^PaddleKeyerThreadedTests$'
+
+      # Keep the fork beside the official app; apply its identity before deployment and signing.
+      - name: Apply fork application identity
+        if: inputs.fork-branding
+        run: |
+          mv build/QK4.app "build/${QK4_MACOS_APP_NAME}.app"
+          python3 - <<'PYTHON'
+          import os
+          import plistlib
+          from pathlib import Path
+
+          app = Path("build") / f"{os.environ['QK4_MACOS_APP_NAME']}.app"
+          info_path = app / "Contents/Info.plist"
+          with info_path.open("rb") as source:
+              info = plistlib.load(source)
+          info["CFBundleName"] = os.environ["QK4_MACOS_APP_NAME"]
+          info["CFBundleDisplayName"] = os.environ["QK4_MACOS_APP_NAME"]
+          info["CFBundleIdentifier"] = os.environ["QK4_MACOS_BUNDLE_ID"]
+          with info_path.open("wb") as destination:
+              plistlib.dump(info, destination)
+          PYTHON
+
       - name: Create app bundle with dependencies
-        run: scripts/macos-bundle.sh build/QK4.app "$QT_ROOT_DIR" "$(brew --prefix openssl@3)"
+        run: scripts/macos-bundle.sh "build/${QK4_MACOS_APP_NAME}.app" "$QT_ROOT_DIR" "$(brew --prefix openssl@3)"
 
       - name: Import Code Signing Certificate
         if: inputs.sign
@@ -122,8 +166,8 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -A -t cert -f pkcs12 \
             -k "$KEYCHAIN_PATH"
@@ -138,7 +182,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           SIGN: ${{ inputs.sign }}
         run: |
-          APP_BUNDLE="build/QK4.app"
+          APP_BUNDLE="build/${QK4_MACOS_APP_NAME}.app"
 
           # WHY one step for both identities: an unsigned build must still walk the same
           # signing order, so the strict verify below judges the same bundle structure a
@@ -180,11 +224,11 @@ jobs:
 
       - name: Create DMG
         run: |
-          APP_BUNDLE="build/QK4.app"
+          APP_BUNDLE="build/${QK4_MACOS_APP_NAME}.app"
 
           echo "=== Creating DMG staging directory ==="
           mkdir -p dmg-staging
-          ditto "$APP_BUNDLE" dmg-staging/QK4.app
+          ditto "$APP_BUNDLE" "dmg-staging/${QK4_MACOS_APP_NAME}.app"
           ln -s /Applications dmg-staging/Applications
 
           sync
@@ -193,7 +237,7 @@ jobs:
 
           echo "=== Creating DMG ==="
           for attempt in 1 2 3; do
-            if hdiutil create -volname "QK4" \
+            if hdiutil create -volname "$QK4_MACOS_APP_NAME" \
               -srcfolder dmg-staging \
               -ov -format UDZO \
               -nocrossdev \
@@ -216,17 +260,16 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
         run: |
-
           echo "=== Signing DMG ==="
           codesign --force --sign "Developer ID Application: Michael Richard Garcia ($APPLE_TEAM_ID)" \
             "$DMG_NAME"
 
           mkdir -p ~/private_keys
-          echo "$APPLE_API_KEY_BASE64" | base64 --decode > ~/private_keys/AuthKey_$APPLE_API_KEY_ID.p8
+          echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$HOME/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
 
           echo "=== Submitting DMG for notarization ==="
           xcrun notarytool submit "$DMG_NAME" \
-            --key ~/private_keys/AuthKey_$APPLE_API_KEY_ID.p8 \
+            --key "$HOME/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8" \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" \
             --wait \
@@ -243,34 +286,62 @@ jobs:
       - name: Verify DMG contents
         env:
           SIGN: ${{ inputs.sign }}
+          PACKAGE_VERSION: ${{ inputs.version }}
         run: |
-          # WHY: this must inspect the *packaged* artifact, not build/QK4.app. Symlink
-          # flattening happens during packaging, so a gate on the build tree passes even
-          # when the shipped bundle is broken. The script also runs the packaged app's
-          # --tls-self-check and requires libssl to load from inside the bundle.
+          # Check the shipped identity and the upstream TLS/dependency gate inside the DMG.
+          # The latter requires OpenSSL to load from this bundle, not the build machine.
           hdiutil attach "$DMG_NAME" -nobrowse -quiet -mountpoint ./verify-mnt
-          STATUS=0
-          scripts/macos-verify-bundle.sh ./verify-mnt/QK4.app || STATUS=$?
+          trap 'hdiutil detach ./verify-mnt -quiet' EXIT
+          APP="./verify-mnt/${QK4_MACOS_APP_NAME}.app"
+          FAIL=0
 
-          # WHY a separate signed gate: the bundle checks above pass on an ad-hoc build too, so on
-          # their own they cannot tell a tester DMG from the unsigned CI one. A signed build must
-          # carry a Developer ID signature with the hardened runtime on the app, a Developer ID
-          # signature on the DMG and a stapled notarization ticket, or the run fails.
-          if [ "$SIGN" = "true" ]; then
-            echo "=== Signed build: Developer ID and notarization ==="
-            APP_SIG=$(codesign -dvv ./verify-mnt/QK4.app 2>&1)
-            echo "$APP_SIG" | grep -q '^Authority=Developer ID Application:' \
-              || { echo "ERROR: app is not Developer ID signed"; STATUS=1; }
-            echo "$APP_SIG" | grep -q '^CodeDirectory .*flags=.*runtime' \
-              || { echo "ERROR: app lacks the hardened runtime"; STATUS=1; }
-            codesign -dvv "$DMG_NAME" 2>&1 | grep -q '^Authority=Developer ID Application:' \
-              || { echo "ERROR: DMG is not Developer ID signed"; STATUS=1; }
-            xcrun stapler validate "$DMG_NAME" \
-              || { echo "ERROR: DMG has no stapled notarization ticket"; STATUS=1; }
+          python3 - "$APP" <<'PYTHON' || FAIL=1
+          import os
+          import plistlib
+          import sys
+          from pathlib import Path
+
+          app = Path(sys.argv[1])
+          with (app / "Contents/Info.plist").open("rb") as source:
+              info = plistlib.load(source)
+          expected = {
+              "CFBundleName": os.environ["QK4_MACOS_APP_NAME"],
+              "CFBundleIdentifier": os.environ["QK4_MACOS_BUNDLE_ID"],
+              "CFBundleExecutable": "QK4",
+          }
+          if os.environ["QK4_MACOS_APP_NAME"] == "QK4 Vail":
+              expected["CFBundleDisplayName"] = "QK4 Vail"
+              if (app.parent / "QK4.app").exists():
+                  sys.exit("ERROR: fork DMG also contains the official QK4.app name")
+          for key, value in expected.items():
+              if info.get(key) != value:
+                  sys.exit(f"ERROR: packaged {key} is {info.get(key)!r}, expected {value!r}")
+          print(f"Packaged identity: {app.name}, {info['CFBundleIdentifier']}")
+          PYTHON
+
+          scripts/macos-verify-bundle.sh "$APP" || FAIL=1
+
+          if ! "$APP/Contents/MacOS/QK4" --version | grep -Fx "QK4 $PACKAGE_VERSION"; then
+            echo "ERROR: packaged app cannot launch or reports the wrong version"
+            FAIL=1
           fi
 
-          hdiutil detach ./verify-mnt -quiet
-          exit $STATUS
+          # The bundle checks accept ad-hoc builds too; signed callers also require Developer ID,
+          # the hardened runtime, and a stapled notarization ticket on the packaged artifacts.
+          if [ "$SIGN" = "true" ]; then
+            echo "=== Signed build: Developer ID and notarization ==="
+            APP_SIG=$(codesign -dvv "$APP" 2>&1) || FAIL=1
+            echo "$APP_SIG" | grep -q '^Authority=Developer ID Application:' \
+              || { echo "ERROR: app is not Developer ID signed"; FAIL=1; }
+            echo "$APP_SIG" | grep -q '^CodeDirectory .*flags=.*runtime' \
+              || { echo "ERROR: app lacks the hardened runtime"; FAIL=1; }
+            codesign -dvv "$DMG_NAME" 2>&1 | grep -q '^Authority=Developer ID Application:' \
+              || { echo "ERROR: DMG is not Developer ID signed"; FAIL=1; }
+            xcrun stapler validate "$DMG_NAME" \
+              || { echo "ERROR: DMG has no stapled notarization ticket"; FAIL=1; }
+          fi
+
+          exit "$FAIL"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
