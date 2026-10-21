@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <atomic>
+#include <memory>
 
 class RadioState;
 class ConnectionController;
@@ -107,7 +108,7 @@ class KpodPlusDevice;
 //     the non-atomic subsystem field.
 //
 //   std::atomic<bool> m_cachedIsV14
-//     Mirror of RadioSettings::halikeyDeviceType() != 1. Stored on the main
+//     Mirror of RadioSettings::halikeyDeviceType() == 0. Stored on the main
 //     thread (ctor + halikeyDeviceTypeChanged, release); read on the HaliKey
 //     worker thread by the PTT DirectConnection handler (acquire). Replaces
 //     a racy worker-thread read of the plain int on the settings singleton.
@@ -216,6 +217,13 @@ public:
     // No signals: pttRequested was the only one, and it went with the footswitch path.
 
 private:
+    void configureVailKeyer();
+    void updateVailKeying();
+    bool m_radioReady = false;
+    // Shared by queued I/O/audio handlers so old software-keyer events cannot play
+    // after selecting a device which already owns its keyer and sidetone.
+    std::shared_ptr<std::atomic<bool>> m_vailSelected = std::make_shared<std::atomic<bool>>(false);
+
     // True when the KPOD+ device owns the CW path — reads the shared
     // atomic gate on ConnectionController with acquire ordering. While
     // set, all locally-driven KZ output + sidetone playback is suppressed.

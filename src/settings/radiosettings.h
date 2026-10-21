@@ -157,7 +157,7 @@ public:
     bool halikeyEnabled() const;
     void setHalikeyEnabled(bool enabled);
     int halikeyDeviceType() const;
-    void setHalikeyDeviceType(int type); // 0=V14, 1=MiDi
+    void setHalikeyDeviceType(int type); // 0=V14, 1=MIDI, 2=Vail
     int sidetoneVolume() const;
     void setSidetoneVolume(int value); // 0-100, default 30
 
@@ -283,7 +283,7 @@ private:
     // HaliKey settings
     QString m_halikeyPortName;
     bool m_halikeyEnabled = false;
-    int m_halikeyDeviceType = 0; // 0=V14, 1=MiDi
+    int m_halikeyDeviceType = 0; // 0=V14, 1=MIDI, 2=Vail
     int m_sidetoneVolume = 30;   // Default 30%
 
     // Macro settings

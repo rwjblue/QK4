@@ -16,7 +16,7 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
     layout->setSpacing(K4Styles::Dimensions::PaddingLarge);
 
     // Title
-    auto *titleLabel = new QLabel("HaliKey", this);
+    auto *titleLabel = new QLabel("CW Keyer", this);
     titleLabel->setStyleSheet(K4Styles::Dialog::titleLabel());
     layout->addWidget(titleLabel);
 
@@ -38,6 +38,7 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
     m_cwKeyerDeviceTypeCombo->setStyleSheet(K4Styles::Dialog::comboBox());
     m_cwKeyerDeviceTypeCombo->addItem("HaliKey V1.4", 0);
     m_cwKeyerDeviceTypeCombo->addItem("HaliKey MIDI", 1);
+    m_cwKeyerDeviceTypeCombo->addItem("Vail Adapter (local keyer)", HalikeyDevice::Vail);
 
     int savedDeviceType = RadioSettings::instance()->halikeyDeviceType();
     m_cwKeyerDeviceTypeCombo->setCurrentIndex(savedDeviceType);
@@ -45,11 +46,10 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
 
     connect(m_cwKeyerDeviceTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         int type = m_cwKeyerDeviceTypeCombo->itemData(index).toInt();
-        RadioSettings::instance()->setHalikeyDeviceType(type);
-        // Disconnect if connected, since device type changed
-        if (m_halikeyDevice && m_halikeyDevice->isConnected()) {
+        if (m_halikeyDevice) {
             m_halikeyDevice->closePort();
         }
+        RadioSettings::instance()->setHalikeyDeviceType(type);
         updateCwKeyerDescription();
         populateCwKeyerPorts();
     });
@@ -144,6 +144,10 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
     m_sidetoneVolumeSlider = new QSlider(Qt::Horizontal, this);
     m_sidetoneVolumeSlider->setRange(0, 100);
     m_sidetoneVolumeSlider->setValue(RadioSettings::instance()->sidetoneVolume());
+    m_sidetoneVolumeSlider->setEnabled(savedDeviceType != HalikeyDevice::Vail);
+    connect(m_cwKeyerDeviceTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        m_sidetoneVolumeSlider->setEnabled(m_cwKeyerDeviceTypeCombo->currentData().toInt() != HalikeyDevice::Vail);
+    });
     m_sidetoneVolumeSlider->setStyleSheet(
         K4Styles::sliderHorizontal(K4Styles::Colors::DarkBackground, K4Styles::Colors::AccentAmber));
 
@@ -165,7 +169,9 @@ CwKeyerPage::CwKeyerPage(HalikeyDevice *halikeyDevice, QWidget *parent)
 
     // Sidetone help text
     auto *sidetoneHelpLabel =
-        new QLabel("Local sidetone volume for CW keying feedback. Frequency is linked to K4's CW pitch setting.", this);
+        new QLabel("Computer sidetone volume. Vail uses its own buzzer; this slider does not control it. "
+                   "Frequency follows the K4's CW pitch setting.",
+                   this);
     sidetoneHelpLabel->setStyleSheet(K4Styles::Dialog::helpText());
     sidetoneHelpLabel->setWordWrap(true);
     layout->addWidget(sidetoneHelpLabel);
@@ -199,7 +205,7 @@ void CwKeyerPage::populateCwKeyerPorts() {
     QString savedPort = RadioSettings::instance()->halikeyPortName();
     int selectedIndex = -1;
 
-    if (deviceType == 1) {
+    if (deviceType == HalikeyDevice::Midi || deviceType == HalikeyDevice::Vail) {
         // MIDI device -- enumerate MIDI ports
         QStringList midiDevices = HalikeyDevice::availableMidiDevices();
         for (int i = 0; i < midiDevices.size(); i++) {
@@ -209,7 +215,7 @@ void CwKeyerPage::populateCwKeyerPorts() {
             }
         }
         // Auto-select first HaliKey MIDI device if no saved selection matched
-        if (selectedIndex < 0) {
+        if (selectedIndex < 0 && deviceType == HalikeyDevice::Midi) {
             for (int i = 0; i < midiDevices.size(); i++) {
                 if (midiDevices[i].contains("HaliKey", Qt::CaseInsensitive)) {
                     selectedIndex = i;
@@ -248,7 +254,13 @@ void CwKeyerPage::updateCwKeyerDescription() {
         return;
 
     int type = m_cwKeyerDeviceTypeCombo->currentData().toInt();
-    if (type == 1) {
+    if (type == HalikeyDevice::Vail) {
+        m_cwKeyerDescLabel->setText("The Vail adapter generates CW and immediate sidetone on its own buzzer. "
+                                    "QK4 follows the K4's speed, pitch and Iambic A/B mode. Select the adapter's MIDI "
+                                    "port (it may use its board name). Keep its buzzer enabled and radio mode off. "
+                                    "Reverse paddles physically; the K4's reversal setting does not affect Vail. "
+                                    "Key holds over 2.4 seconds stop transmission until all inputs release.");
+    } else if (type == 1) {
         m_cwKeyerDescLabel->setText("Connect a HaliKey MIDI paddle interface to send CW via the K4's keyer. "
                                     "The HaliKey MIDI uses standard MIDI note events to detect paddle and PTT inputs.");
     } else {

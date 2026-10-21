@@ -553,6 +553,55 @@ target_include_directories(test_audiodeviceselection PRIVATE ${CMAKE_SOURCE_DIR}
 target_link_libraries(test_audiodeviceselection Qt6::Core Qt6::Test)
 add_test(NAME AudioDeviceSelectionTests COMMAND test_audiodeviceselection)
 
+add_executable(test_vailmidiprotocol test_vailmidiprotocol.cpp)
+target_include_directories(test_vailmidiprotocol PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_vailmidiprotocol Qt6::Core Qt6::Test)
+add_test(NAME VailMidiProtocolTests COMMAND test_vailmidiprotocol)
+
+add_executable(test_vailcatrouting test_vailcatrouting.cpp)
+target_include_directories(test_vailcatrouting PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_vailcatrouting Qt6::Core Qt6::Test)
+add_test(NAME VailCatRoutingTests COMMAND test_vailcatrouting)
+
+if(NOT QK4_TESTS_ONLY)
+    add_executable(test_vaildevice test_vaildevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/hardware/halikeydevice.cpp
+        ${CMAKE_SOURCE_DIR}/src/hardware/halikeyworkerbase.cpp
+        ${CMAKE_SOURCE_DIR}/src/hardware/halikeyv14worker.cpp
+        ${CMAKE_SOURCE_DIR}/src/hardware/halikeymidiworker.cpp
+        ${CMAKE_SOURCE_DIR}/src/hardware/vailmidiworker.cpp
+        ${CMAKE_SOURCE_DIR}/third_party/rtmidi/RtMidi.cpp
+    )
+    target_include_directories(test_vaildevice PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party/rtmidi)
+    target_link_libraries(test_vaildevice Qt6::Core Qt6::SerialPort Qt6::Test)
+    if(APPLE)
+        target_compile_definitions(test_vaildevice PRIVATE __MACOSX_CORE__)
+        target_link_libraries(test_vaildevice "-framework CoreMIDI" "-framework CoreAudio" "-framework CoreFoundation")
+    elseif(WIN32)
+        target_compile_definitions(test_vaildevice PRIVATE __WINDOWS_MM__)
+        target_link_libraries(test_vaildevice winmm)
+    else()
+        target_compile_definitions(test_vaildevice PRIVATE __LINUX_ALSA__)
+        target_link_libraries(test_vaildevice asound)
+    endif()
+    add_test(NAME VailDeviceTests COMMAND test_vaildevice)
+
+    get_target_property(_vail_sources test_vaildevice SOURCES)
+    list(REMOVE_ITEM _vail_sources test_vaildevice.cpp)
+    get_target_property(_vail_definitions test_vaildevice COMPILE_DEFINITIONS)
+    get_target_property(_vail_libraries test_vaildevice LINK_LIBRARIES)
+    add_executable(test_vailkeyerpage test_vailkeyerpage.cpp ${_vail_sources}
+        ${CMAKE_SOURCE_DIR}/src/ui/pages/cwkeyerpage.cpp
+        ${CMAKE_SOURCE_DIR}/src/ui/styling/k4styles.cpp
+        ${CMAKE_SOURCE_DIR}/src/settings/radiosettings.cpp
+    )
+    target_include_directories(test_vailkeyerpage PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party/rtmidi)
+    target_compile_definitions(test_vailkeyerpage PRIVATE ${_vail_definitions})
+    target_link_libraries(test_vailkeyerpage ${_vail_libraries} Qt6::Widgets Qt6::Network)
+    add_test(NAME VailKeyerPageTests COMMAND test_vailkeyerpage)
+    set_tests_properties(VailKeyerPageTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 # Aggregate target: `cmake --build <dir> --target qk4_tests` builds every
 # test_* executable defined above. CI uses this so adding `add_executable(test_foo)`
 # automatically gets the new test built — no parallel maintenance of an explicit
